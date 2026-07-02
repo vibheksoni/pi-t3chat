@@ -8,7 +8,7 @@
  * Tries wreq-js (TLS impersonation) first, falls back to standard fetch.
  */
 import { parseSSEStream, type SSEEvent } from "./sse";
-import { buildConfigObject, type ChatConfig } from "./config";
+import { buildConfigObject, defaultConfig, type ChatConfig } from "./config";
 
 export type ContentPart =
   | { type: "text"; text: string }
@@ -72,16 +72,13 @@ function normalizeContent(content: string | ContentPart[] | unknown): string {
 function buildMessagesPayload(messages: ChatHistoryItem[]): Array<Record<string, unknown>> {
   return messages.map((m) => {
     const text = normalizeContent(m.content);
-    const out: Record<string, unknown> = { role: m.role, content: text };
-    if (m.role === "tool" && m.tool_call_id) out.tool_call_id = m.tool_call_id;
-    if (m.role === "assistant" && m.tool_calls && m.tool_calls.length > 0) {
-      out.tool_calls = m.tool_calls.map((tc) => ({
-        id: tc.id,
-        type: "function",
-        function: { name: tc.name, arguments: tc.arguments },
-      }));
-    }
-    return out;
+    const role = m.role === "assistant" ? "assistant" : "user";
+    return {
+      id: crypto.randomUUID(),
+      parts: [{ type: "text", text }],
+      role,
+      attachments: [],
+    };
   });
 }
 
@@ -112,12 +109,46 @@ function mapSSEEvent(ev: SSEEvent): ChatEvent | null {
 
 export async function* streamChat(req: ChatRequest): AsyncGenerator<ChatEvent> {
   const threadId = req.threadId ?? crypto.randomUUID();
+  const cfg = req.config ?? defaultConfig();
   const body = JSON.stringify({
     messages: buildMessagesPayload(req.messages),
+    threadMetadata: {
+      id: threadId,
+      title: "",
+    },
+    clientAuth: { isSignedIn: true },
+    responseMessageId: crypto.randomUUID(),
     model: req.model,
-    threadId,
     convexSessionId: req.convexSessionId,
-    config: buildConfigObject(req.config),
+    modelParams: {
+      reasoningEffort: cfg.reasoningEffort ?? "medium",
+      includeSearch: cfg.includeSearch ?? false,
+      searchLimit: 1,
+    },
+    preferences: {
+      name: "",
+      occupation: "",
+      selectedTraits: [],
+      additionalInfo: "",
+    },
+    userConfiguration: {
+      codeFont: "berkeley",
+      currentModelParameters: {
+        includeSearch: cfg.includeSearch ?? false,
+        reasoningEffort: cfg.reasoningEffort ?? "medium",
+      },
+      currentlySelectedModel: req.model,
+      favoriteModels: [],
+      hasMigrated: true,
+      mainFont: "proxima",
+      streamerMode: false,
+      theme: "dark",
+    },
+    userInfo: {
+      timezone: "America/New_York",
+      locale: "en-US",
+    },
+    isEphemeral: false,
   });
 
   const timeoutController = new AbortController();
@@ -133,8 +164,9 @@ export async function* streamChat(req: ChatRequest): AsyncGenerator<ChatEvent> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     Cookie: req.cookies,
-    Referer: "https://t3.chat/",
+    Referer: `https://t3.chat/chat/${threadId}`,
     Origin: "https://t3.chat",
+    Accept: "*/*",
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
   };
 
