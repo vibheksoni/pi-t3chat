@@ -26,6 +26,14 @@ import {
   normalizeStreamedToolCalls,
   toolCorrectionPrompt,
 } from "./tools";
+import {
+  splitMcpTools,
+  mcpWrapperSystemPrompt,
+  mcpGroupToolNames,
+  handleWrapperCalls,
+  wrapperResultsToUserMessage,
+  MAX_WRAPPER_ROUNDS,
+} from "./mcp";
 
 const T3_PROXY_HOST = "127.0.0.1";
 const T3_PROXY_PORT = 42101;
@@ -147,15 +155,28 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       const hasTools = toolsRaw !== null;
 
       let messages: ChatHistoryItem[];
+      let mcpGroups: ReturnType<typeof splitMcpTools>["groups"] = new Map();
+      let regularToolsRaw: OpenAIToolDef[] | null = null;
 
       if (hasTools) {
+        const { mcpTools, regularTools, groups } = splitMcpTools(toolsRaw);
+        mcpGroups = groups;
+        regularToolsRaw = regularTools.length > 0 ? regularTools : null;
+        const groupedNames = mcpGroupToolNames(groups);
+        const nonMcpTools: OpenAIToolDef[] = regularTools;
+        const mcpToolCount = mcpTools.length;
+        const groupCount = groups.size;
+
         const { systemPrompt, apiMessages } = chatMessagesToApiPayload(requestBody.messages, true);
-        const toolPrompt = toolsToSystemPrompt(toolsRaw);
-        const fullSystem = [systemPrompt, toolPrompt].filter(Boolean).join("\n\n");
+        const regularPrompt = regularToolsRaw ? toolsToSystemPrompt(regularToolsRaw) : "";
+        const mcpPrompt = mcpWrapperSystemPrompt(groups);
+        const fullSystem = [systemPrompt, regularPrompt, mcpPrompt].filter(Boolean).join("\n\n");
 
         if (apiMessages.length > 0 && apiMessages[apiMessages.length - 1].role === "user") {
           const lastIdx = apiMessages.length - 1;
-          apiMessages[lastIdx].content = String(apiMessages[lastIdx].content) + toolsToUserReminder(toolsRaw);
+          if (regularToolsRaw) {
+            apiMessages[lastIdx].content = String(apiMessages[lastIdx].content) + toolsToUserReminder(regularToolsRaw);
+          }
         }
 
         messages = [];
@@ -163,7 +184,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
         for (const m of apiMessages) {
           messages.push({ role: m.role as ChatHistoryItem["role"], content: String(m.content) });
         }
-        console.log(`[t3chat-proxy] tools=${toolsRaw!.length} prompt=${toolPrompt.length}ch msgs=${messages.length}`);
+        console.log(`[t3chat-proxy] tools=${toolsRaw!.length} mcp=${mcpToolCount}(${groupCount} groups) regular=${nonMcpTools.length} prompt=${fullSystem.length}ch msgs=${messages.length}`);
       } else {
         messages = requestBody.messages.map((m) => {
           const item: ChatHistoryItem = { role: m.role as ChatHistoryItem["role"], content: m.content as ChatHistoryItem["content"] };
@@ -198,7 +219,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
           if (hasTools) {
             await streamWithTools({
               res, responseId, requestedModel, creds, resolvedModelId: resolved.modelId,
-              messages, toolsRaw, signal: abort.signal,
+              messages, toolsRaw: regularToolsRaw ?? [], mcpGroups, signal: abort.signal,
             });
           } else {
             await streamDirect({
@@ -218,7 +239,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
         if (hasTools) {
           await nonStreamingWithTools({
             res, requestedModel, creds, resolvedModelId: resolved.modelId,
-            messages, toolsRaw,
+            messages, toolsRaw: regularToolsRaw ?? [], mcpGroups,
           });
         } else {
           await nonStreamingDirect({
@@ -313,6 +334,7 @@ async function streamDirect(ctx: StreamCtx): Promise<void> {
 
 interface ToolStreamCtx extends StreamCtx {
   toolsRaw: OpenAIToolDef[];
+  mcpGroups: Map<string, { name: string; tools: Array<{ name: string; clientToolName: string; description: string; parameters: Record<string, unknown> }> }>;
 }
 
 async function streamWithTools(ctx: ToolStreamCtx): Promise<void> {
@@ -322,6 +344,7 @@ async function streamWithTools(ctx: ToolStreamCtx): Promise<void> {
   let corrections = 0;
   const maxCorrections = 2;
   let messages = [...ctx.messages];
+  let wrapperRounds = 0;
 
   while (true) {
     let text = "";
@@ -341,6 +364,62 @@ async function streamWithTools(ctx: ToolStreamCtx): Promise<void> {
         accumulator.add([{ id: ev.id, name: ev.name, arguments: "" }]);
       } else if (ev.kind === "tool_call_args") {
         accumulator.add([{ arguments: ev.argsDelta }]);
+      }
+    }
+
+    const wrapperResult = handleWrapperCalls(text, ctx.mcpGroups);
+    if (wrapperResult.handled && wrapperRounds < MAX_WRAPPER_ROUNDS) {
+      wrapperRounds++;
+      const feedbackParts: string[] = [];
+      if (wrapperResult.internalResults.length > 0) {
+        feedbackParts.push(wrapperResultsToUserMessage(wrapperResult.internalResults));
+      }
+      if (wrapperResult.translatedCalls.length > 0) {
+        const allCalls = [...wrapperResult.translatedCalls];
+        const streamedCalls = accumulator.snapshot();
+        const parsedCalls = translator.fromTextBlocks(wrapperResult.passthroughText);
+        const passthroughCalls = streamedCalls.length > 0 ? streamedCalls : parsedCalls;
+        const normalizedToolCalls = normalizeStreamedToolCalls(
+          allCalls.concat(passthroughCalls as unknown as typeof allCalls), ctx.toolsRaw,
+        );
+
+        if (normalizedToolCalls.length > 0) {
+          if (reasoning) {
+            ctx.res.write(`data: ${JSON.stringify({
+              id: ctx.responseId, object: "chat.completion.chunk",
+              created: Math.floor(Date.now() / 1000), model: ctx.requestedModel,
+              choices: [{ index: 0, delta: { role: "assistant", reasoning, reasoning_text: reasoning, reasoning_content: reasoning }, finish_reason: null }],
+            })}\n\n`);
+          }
+          const cleanedText = stripToolBlocks(wrapperResult.passthroughText);
+          if (cleanedText) {
+            ctx.res.write(`data: ${JSON.stringify({
+              id: ctx.responseId, object: "chat.completion.chunk",
+              created: Math.floor(Date.now() / 1000), model: ctx.requestedModel,
+              choices: [{ index: 0, delta: { role: "assistant", content: cleanedText }, finish_reason: null }],
+            })}\n\n`);
+          }
+          for (let i = 0; i < normalizedToolCalls.length; i++) {
+            const tc = normalizedToolCalls[i];
+            ctx.res.write(`data: ${JSON.stringify({
+              id: ctx.responseId, object: "chat.completion.chunk",
+              created: Math.floor(Date.now() / 1000), model: ctx.requestedModel,
+              choices: [{ index: 0, delta: { tool_calls: [{ index: i, id: tc.id, type: "function", function: { name: tc.name, arguments: tc.arguments } }] }, finish_reason: null }],
+            })}\n\n`);
+          }
+          ctx.res.write(`data: ${JSON.stringify({
+            id: ctx.responseId, object: "chat.completion.chunk",
+            created: Math.floor(Date.now() / 1000), model: ctx.requestedModel,
+            choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }],
+          })}\n\n`);
+          ctx.res.write("data: [DONE]\n\n");
+          ctx.res.end();
+          return;
+        }
+      }
+      if (feedbackParts.length > 0) {
+        messages = [...messages, { role: "assistant", content: text }, { role: "user", content: feedbackParts.join("\n\n") }];
+        continue;
       }
     }
 
@@ -465,6 +544,7 @@ async function nonStreamingDirect(ctx: NonStreamCtx): Promise<void> {
 
 interface NonStreamToolCtx extends NonStreamCtx {
   toolsRaw: OpenAIToolDef[];
+  mcpGroups: Map<string, { name: string; tools: Array<{ name: string; clientToolName: string; description: string; parameters: Record<string, unknown> }> }>;
 }
 
 async function nonStreamingWithTools(ctx: NonStreamToolCtx): Promise<void> {
@@ -474,6 +554,7 @@ async function nonStreamingWithTools(ctx: NonStreamToolCtx): Promise<void> {
   let corrections = 0;
   const maxCorrections = 2;
   let messages = [...ctx.messages];
+  let wrapperRounds = 0;
 
   while (true) {
     let text = "";
@@ -492,6 +573,52 @@ async function nonStreamingWithTools(ctx: NonStreamToolCtx): Promise<void> {
         accumulator.add([{ id: ev.id, name: ev.name, arguments: "" }]);
       } else if (ev.kind === "tool_call_args") {
         accumulator.add([{ arguments: ev.argsDelta }]);
+      }
+    }
+
+    const wrapperResult = handleWrapperCalls(text, ctx.mcpGroups);
+    if (wrapperResult.handled && wrapperRounds < MAX_WRAPPER_ROUNDS) {
+      wrapperRounds++;
+      const feedbackParts: string[] = [];
+      if (wrapperResult.internalResults.length > 0) {
+        feedbackParts.push(wrapperResultsToUserMessage(wrapperResult.internalResults));
+      }
+      if (wrapperResult.translatedCalls.length > 0) {
+        const allCalls = [...wrapperResult.translatedCalls];
+        const streamedCalls = accumulator.snapshot();
+        const parsedCalls = translator.fromTextBlocks(wrapperResult.passthroughText);
+        const passthroughCalls = streamedCalls.length > 0 ? streamedCalls : parsedCalls;
+        const normalizedToolCalls = normalizeStreamedToolCalls(
+          allCalls.concat(passthroughCalls as unknown as typeof allCalls), ctx.toolsRaw,
+        );
+
+        if (normalizedToolCalls.length > 0) {
+          const assistantMessage: Record<string, unknown> = {
+            role: "assistant",
+            content: stripToolBlocks(wrapperResult.passthroughText),
+            tool_calls: normalizedToolCalls.map((tc) => ({
+              id: tc.id, type: "function", function: { name: tc.name, arguments: tc.arguments },
+            })),
+          };
+          if (reasoning) {
+            assistantMessage.reasoning = reasoning;
+            assistantMessage.reasoning_text = reasoning;
+            assistantMessage.reasoning_content = reasoning;
+          }
+          ctx.res.writeHead(200, { "Content-Type": "application/json" });
+          ctx.res.end(JSON.stringify({
+            id: `chatcmpl-${crypto.randomUUID()}`,
+            object: "chat.completion",
+            created: Math.floor(Date.now() / 1000),
+            model: ctx.requestedModel,
+            choices: [{ index: 0, message: assistantMessage, finish_reason: "tool_calls" }],
+          }));
+          return;
+        }
+      }
+      if (feedbackParts.length > 0) {
+        messages = [...messages, { role: "assistant", content: text }, { role: "user", content: feedbackParts.join("\n\n") }];
+        continue;
       }
     }
 
