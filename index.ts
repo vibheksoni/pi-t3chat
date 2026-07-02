@@ -13,6 +13,7 @@ import { loadCredentials, saveCredentials, deleteCredentials, validateCredential
 import { getCachedCatalog, clearCachedCatalog } from "./catalog";
 import { modelToPiModel } from "./models";
 import { getCustomerData, getSubscriptionData } from "./usage";
+import { setNotifier, logInfo, logWarn, logError } from "./log";
 
 let _pi: ExtensionAPI | null = null;
 
@@ -23,15 +24,15 @@ async function fetchDynamicModels(): Promise<ReturnType<typeof modelToPiModel>[]
       const models = [...catalog.byId.values()]
         .filter((m) => !m.disabled)
         .map(modelToPiModel);
-      console.error(`[t3chat] loaded ${models.length} models from catalog`);
+      logInfo(`t3chat: loaded ${models.length} models from catalog`);
       return models;
     }
     if (catalog && catalog.byId.size === 0) {
-      console.error("[t3chat] catalog fetched but found 0 models — JS parsing may have failed");
+      logWarn("t3chat: catalog fetched but found 0 models — JS parsing may have failed");
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    console.error(`[t3chat] catalog fetch failed: ${msg}`);
+    logError(`t3chat: catalog fetch failed: ${msg}`);
     _catalogError = msg;
   }
   return [];
@@ -62,8 +63,8 @@ async function loginT3Chat(callbacks: OAuthLoginCallbacks): Promise<OAuthCredent
 
   const result = await validateCredentials(creds);
   if (!result.ok) {
-    console.error(`[t3chat] credential validation failed: ${result.error ?? "unknown error"}`);
-    console.error("[t3chat] saving credentials anyway — chat may still work");
+    logWarn(`t3chat: credential validation failed: ${result.error ?? "unknown error"}`);
+    logWarn("t3chat: saving credentials anyway — chat may still work");
   }
 
   saveCredentials(creds);
@@ -96,7 +97,7 @@ export default async function (pi: ExtensionAPI) {
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    console.error(`[t3chat] credential load failed: ${msg}`);
+    logError(`t3chat: credential load failed: ${msg}`);
     _catalogError = `credential load: ${msg}`;
   }
 
@@ -117,13 +118,19 @@ export default async function (pi: ExtensionAPI) {
     },
   });
 
-  console.error(hasCreds ? `[t3chat] connected — ${models.length} models` : `[t3chat] /login t3chat to connect`);
+  logInfo(hasCreds ? `t3chat: connected — ${models.length} models` : `t3chat: /login t3chat to connect`);
+
+  setNotifier(null);
 
   pi.on("session_start", async (_event, ctx) => {
+    setNotifier((message, level) => {
+      ctx.ui.notify(message, level);
+    });
+
     if (_catalogError) {
       ctx.ui.notify(`t3chat: model catalog failed — ${_catalogError}`, "error");
     } else if (hasCreds && models.length === 0) {
-      ctx.ui.notify("t3chat: logged in but 0 models loaded — run t3chat-refresh or check console for errors", "warning");
+      ctx.ui.notify("t3chat: logged in but 0 models loaded — run t3chat-refresh", "warning");
     }
   });
 
@@ -186,6 +193,7 @@ export default async function (pi: ExtensionAPI) {
 
   pi.on("session_shutdown", async () => {
     _pi = null;
+    setNotifier(null);
     stopProxy();
   });
 }

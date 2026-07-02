@@ -8,6 +8,7 @@
  *
  * Tries wreq-js (TLS impersonation) first, falls back to standard fetch.
  */
+import { logError } from "./log";
 
 export interface ModelInfo {
   id: string;
@@ -244,7 +245,7 @@ async function fetchCatalog(): Promise<ModelCatalog | null> {
 
     return { byId, fetchedAt: Date.now() };
   } catch (e) {
-    console.error(`[t3chat] catalog fetch failed: ${e instanceof Error ? e.message : String(e)}`);
+    logError(`t3chat: catalog fetch failed: ${e instanceof Error ? e.message : String(e)}`);
     return null;
   }
 }

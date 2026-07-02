@@ -34,6 +34,7 @@ import {
   wrapperResultsToUserMessage,
   MAX_WRAPPER_ROUNDS,
 } from "./mcp";
+import { logInfo } from "./log";
 
 const T3_PROXY_HOST = "127.0.0.1";
 const T3_PROXY_PORT = 42101;
@@ -149,7 +150,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
 
       const requestedModel = requestBody.model || getDefaultModel();
       const resolved = await resolveModelName(requestedModel);
-      console.log(`[t3chat-proxy] model=${requestedModel} → id=${resolved.modelId}`);
+      logInfo(`t3chat-proxy: model=${requestedModel} → id=${resolved.modelId}`);
 
       const toolsRaw: OpenAIToolDef[] | null = (requestBody.tools && requestBody.tools.length > 0) ? requestBody.tools : null;
       const hasTools = toolsRaw !== null;
@@ -184,7 +185,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
         for (const m of apiMessages) {
           messages.push({ role: m.role as ChatHistoryItem["role"], content: String(m.content) });
         }
-        console.log(`[t3chat-proxy] tools=${toolsRaw!.length} mcp=${mcpToolCount}(${groupCount} groups) regular=${nonMcpTools.length} prompt=${fullSystem.length}ch msgs=${messages.length}`);
+        logInfo(`t3chat-proxy: tools=${toolsRaw!.length} mcp=${mcpToolCount}(${groupCount} groups) regular=${nonMcpTools.length} prompt=${fullSystem.length}ch msgs=${messages.length}`);
       } else {
         messages = requestBody.messages.map((m) => {
           const item: ChatHistoryItem = { role: m.role as ChatHistoryItem["role"], content: m.content as ChatHistoryItem["content"] };
@@ -464,7 +465,7 @@ async function streamWithTools(ctx: ToolStreamCtx): Promise<void> {
 
     if (corrections < maxCorrections && refusalDetector.looksLikeFalseRefusal(cleanedText)) {
       corrections++;
-      console.log(`[t3chat-proxy] false refusal correction #${corrections}`);
+      logInfo(`t3chat-proxy: false refusal correction #${corrections}`);
       messages = [...messages, { role: "assistant", content: text }, { role: "user", content: toolCorrectionPrompt(registry) }];
       continue;
     }
@@ -654,7 +655,7 @@ async function nonStreamingWithTools(ctx: NonStreamToolCtx): Promise<void> {
 
     if (corrections < maxCorrections && refusalDetector.looksLikeFalseRefusal(cleanedText)) {
       corrections++;
-      console.log(`[t3chat-proxy] false refusal correction #${corrections}`);
+      logInfo(`t3chat-proxy: false refusal correction #${corrections}`);
       messages = [...messages, { role: "assistant", content: text }, { role: "user", content: toolCorrectionPrompt(registry) }];
       continue;
     }
