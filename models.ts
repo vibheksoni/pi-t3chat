@@ -101,7 +101,10 @@ export function modelToPiModel(m: ModelInfo) {
       cacheRead: m.cost.cacheRead * 1_000_000,
       cacheWrite: m.cost.cacheWrite * 1_000_000,
     },
-    contextWindow: ctx || 1,
-    maxTokens: maxOut || 1,
+    contextWindow: ctx || 128000,
+    maxTokens: maxOut || 4096,
+    compat: {
+      supportsUsageInStreaming: true,
+    },
   };
 }
