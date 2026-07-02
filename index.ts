@@ -26,11 +26,18 @@ async function fetchDynamicModels(): Promise<ReturnType<typeof modelToPiModel>[]
       console.error(`[t3chat] loaded ${models.length} models from catalog`);
       return models;
     }
+    if (catalog && catalog.byId.size === 0) {
+      console.error("[t3chat] catalog fetched but found 0 models — JS parsing may have failed");
+    }
   } catch (e) {
-    console.error(`[t3chat] catalog fetch failed: ${e instanceof Error ? e.message : String(e)}`);
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error(`[t3chat] catalog fetch failed: ${msg}`);
+    _catalogError = msg;
   }
   return [];
 }
+
+let _catalogError: string | null = null;
 
 async function loginT3Chat(callbacks: OAuthLoginCallbacks): Promise<OAuthCredentials> {
   const cookies = await callbacks.onPrompt({
@@ -87,7 +94,11 @@ export default async function (pi: ExtensionAPI) {
       setProxyCredentials(stored);
       hasCreds = true;
     }
-  } catch {}
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error(`[t3chat] credential load failed: ${msg}`);
+    _catalogError = `credential load: ${msg}`;
+  }
 
   const models = hasCreds ? await fetchDynamicModels() : [];
 
@@ -107,6 +118,14 @@ export default async function (pi: ExtensionAPI) {
   });
 
   console.error(hasCreds ? `[t3chat] connected — ${models.length} models` : `[t3chat] /login t3chat to connect`);
+
+  pi.on("session_start", async (_event, ctx) => {
+    if (_catalogError) {
+      ctx.ui.notify(`t3chat: model catalog failed — ${_catalogError}`, "error");
+    } else if (hasCreds && models.length === 0) {
+      ctx.ui.notify("t3chat: logged in but 0 models loaded — run t3chat-refresh or check console for errors", "warning");
+    }
+  });
 
   pi.registerCommand("t3chat-status", {
     description: "Show t3.chat auth status, credits, and subscription",
