@@ -113,7 +113,7 @@ export default async function (pi: ExtensionAPI) {
       name: "t3.chat",
       login: loginT3Chat,
       refreshToken: refreshT3Token,
-      getApiKey: (creds: OAuthCredentials) => creds.access,
+      getApiKey: () => PROXY_SECRET,
     },
   });
 
