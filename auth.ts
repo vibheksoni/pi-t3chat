@@ -60,14 +60,20 @@ export function deleteCredentials(): boolean {
 /**
  * Validate credentials by hitting t3.chat's status endpoint.
  * Returns true if the cookies are still valid.
+ *
+ * Uses wreq-js for TLS impersonation — standard fetch() gets blocked.
  */
 export async function validateCredentials(creds: T3Credentials): Promise<boolean> {
   try {
-    const resp = await fetch("https://t3.chat/api/status?dpl=LATEST", {
+    const { request } = await import("wreq-js");
+    const resp = await request("https://t3.chat/api/status?dpl=LATEST", {
+      method: "GET",
       headers: {
         Cookie: creds.cookies,
         Referer: "https://t3.chat/",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
       },
+      impersonate: "chrome136",
     });
     return resp.ok;
   } catch {
