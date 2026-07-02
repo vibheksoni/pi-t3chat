@@ -1,9 +1,14 @@
 {
   "name": "pi-t3chat",
   "version": "1.0.0",
+  "type": "module",
+  "private": false,
   "description": "pi-t3chat — t3.chat extension for Pi coding agent. 50+ frontier AI models (Claude Fable-5, GPT-5.6, Gemini 3.5, Grok 4.3, DeepSeek V4, Llama 4, Qwen 3) via t3.chat subscription. TLS impersonation, dynamic model discovery, tool calling, MCP wrapper tools.",
   "author": "Vibhek Soni",
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "keywords": [
     "pi-package",
     "pi",
@@ -71,7 +76,16 @@
   "pi": {
     "extensions": [
       "./index.ts"
-    ]
+    ],
+    "image": "https://raw.githubusercontent.com/vibheksoni/pi-t3chat/main/assets/showcase.png"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-ai": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": { "optional": true },
+    "@earendil-works/pi-ai": { "optional": true }
   },
   "files": [
     "*.ts",
