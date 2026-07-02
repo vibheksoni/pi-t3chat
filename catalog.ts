@@ -34,6 +34,8 @@ export interface ModelInfo {
   };
   features: string[];
   creditAmount: number;
+  retiredOn?: string;
+  succededBy?: string;
 }
 
 export interface ModelCatalog {
@@ -162,11 +164,14 @@ function parseModelsFromJs(js: string): ModelInfo[] {
     };
 
     const features = extractFeaturesArray(block);
+    const retiredOn = extractStringField(block, "retiredOn");
+    const succededBy = extractStringField(block, "succededBy");
 
     models.push({
       id, name, provider, developer,
       requiresPro, premium, disabled, legacy,
       cost, limits, features, creditAmount,
+      retiredOn, succededBy,
     });
   }
 
@@ -243,6 +248,7 @@ async function fetchCatalog(): Promise<ModelCatalog | null> {
       const isImageOnly = model.features.length > 0
         && model.features.every((f) => f === "images");
       if (isImageOnly) continue;
+      if (model.retiredOn) continue;
       byId.set(model.id, model);
     }
 
