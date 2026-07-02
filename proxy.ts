@@ -35,7 +35,7 @@ import {
   MAX_WRAPPER_ROUNDS,
 } from "./mcp";
 import { logInfo } from "./log";
-import { estimateTokens, estimatePromptTokens } from "./tokens";
+import { estimateTokens, estimatePromptTokens, buildUsage } from "./tokens";
 
 const T3_PROXY_HOST = "127.0.0.1";
 const T3_PROXY_PORT = 42101;
@@ -55,12 +55,17 @@ interface ChatCompletionRequest {
     tool_call_id?: string;
     name?: string;
     tool_calls?: Array<{ id?: string; type?: string; function?: { name?: string; arguments?: string } }>;
+    reasoning_content?: string;
   }>;
   stream?: boolean;
   temperature?: number;
   max_tokens?: number;
+  max_completion_tokens?: number;
   tools?: OpenAIToolDef[];
   providerOptions?: Record<string, unknown>;
+  reasoning_effort?: string;
+  stream_options?: { include_usage?: boolean };
+  store?: boolean;
 }
 
 function openAIError(status: number, message: string): { status: number; body: string; contentType: string } {
@@ -189,7 +194,8 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
         logInfo(`t3chat-proxy: tools=${toolsRaw!.length} mcp=${mcpToolCount}(${groupCount} groups) regular=${nonMcpTools.length} prompt=${fullSystem.length}ch msgs=${messages.length}`);
       } else {
         messages = requestBody.messages.map((m) => {
-          const item: ChatHistoryItem = { role: m.role as ChatHistoryItem["role"], content: m.content as ChatHistoryItem["content"] };
+          const role = m.role === "developer" ? "system" : m.role;
+          const item: ChatHistoryItem = { role: role as ChatHistoryItem["role"], content: m.content as ChatHistoryItem["content"] };
           if (m.role === "tool" && typeof m.tool_call_id === "string") item.tool_call_id = m.tool_call_id;
           if (m.role === "assistant" && Array.isArray(m.tool_calls)) {
             item.tool_calls = m.tool_calls
@@ -333,7 +339,7 @@ async function streamDirect(ctx: StreamCtx): Promise<void> {
     id: ctx.responseId, object: "chat.completion.chunk",
     created: Math.floor(Date.now() / 1000), model: ctx.requestedModel,
     choices: [{ index: 0, delta: {}, finish_reason: finalReason }],
-    usage: { prompt_tokens: promptTokens, completion_tokens: completionTokens, total_tokens: promptTokens + completionTokens },
+    usage: buildUsage(promptTokens, completionTokens),
   })}\n\n`);
   ctx.res.write("data: [DONE]\n\n");
   ctx.res.end();
@@ -419,7 +425,7 @@ async function streamWithTools(ctx: ToolStreamCtx): Promise<void> {
             id: ctx.responseId, object: "chat.completion.chunk",
             created: Math.floor(Date.now() / 1000), model: ctx.requestedModel,
             choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }],
-            usage: { prompt_tokens: estimatePromptTokens(ctx.messages), completion_tokens: estimateTokens(completionText), total_tokens: estimatePromptTokens(ctx.messages) + estimateTokens(completionText) },
+            usage: buildUsage(estimatePromptTokens(ctx.messages), estimateTokens(completionText)),
           })}\n\n`);
           ctx.res.write("data: [DONE]\n\n");
           ctx.res.end();
@@ -465,7 +471,7 @@ async function streamWithTools(ctx: ToolStreamCtx): Promise<void> {
         id: ctx.responseId, object: "chat.completion.chunk",
         created: Math.floor(Date.now() / 1000), model: ctx.requestedModel,
         choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }],
-        usage: { prompt_tokens: estimatePromptTokens(ctx.messages), completion_tokens: estimateTokens(completionText), total_tokens: estimatePromptTokens(ctx.messages) + estimateTokens(completionText) },
+        usage: buildUsage(estimatePromptTokens(ctx.messages), estimateTokens(completionText)),
       })}\n\n`);
       ctx.res.write("data: [DONE]\n\n");
       ctx.res.end();
@@ -497,7 +503,7 @@ async function streamWithTools(ctx: ToolStreamCtx): Promise<void> {
         id: ctx.responseId, object: "chat.completion.chunk",
         created: Math.floor(Date.now() / 1000), model: ctx.requestedModel,
         choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
-        usage: { prompt_tokens: estimatePromptTokens(ctx.messages), completion_tokens: estimateTokens(completionText), total_tokens: estimatePromptTokens(ctx.messages) + estimateTokens(completionText) },
+        usage: buildUsage(estimatePromptTokens(ctx.messages), estimateTokens(completionText)),
       })}\n\n`);
     ctx.res.write("data: [DONE]\n\n");
     ctx.res.end();
@@ -550,7 +556,7 @@ async function nonStreamingDirect(ctx: NonStreamCtx): Promise<void> {
     created: Math.floor(Date.now() / 1000),
     model: ctx.requestedModel,
     choices: [{ index: 0, message: assistantMessage, finish_reason: finishReason }],
-    usage: { prompt_tokens: estimatePromptTokens(ctx.messages), completion_tokens: estimateTokens(collected), total_tokens: estimatePromptTokens(ctx.messages) + estimateTokens(collected) },
+    usage: buildUsage(estimatePromptTokens(ctx.messages), estimateTokens(collected)),
   }));
 }
 
@@ -625,7 +631,7 @@ async function nonStreamingWithTools(ctx: NonStreamToolCtx): Promise<void> {
             created: Math.floor(Date.now() / 1000),
             model: ctx.requestedModel,
             choices: [{ index: 0, message: assistantMessage, finish_reason: "tool_calls" }],
-            usage: { prompt_tokens: estimatePromptTokens(ctx.messages), completion_tokens: estimateTokens(completionText), total_tokens: estimatePromptTokens(ctx.messages) + estimateTokens(completionText) },
+            usage: buildUsage(estimatePromptTokens(ctx.messages), estimateTokens(completionText)),
           }));
           return;
         }
@@ -662,7 +668,7 @@ async function nonStreamingWithTools(ctx: NonStreamToolCtx): Promise<void> {
         created: Math.floor(Date.now() / 1000),
         model: ctx.requestedModel,
         choices: [{ index: 0, message: assistantMessage, finish_reason: "tool_calls" }],
-        usage: { prompt_tokens: estimatePromptTokens(ctx.messages), completion_tokens: estimateTokens(completionText), total_tokens: estimatePromptTokens(ctx.messages) + estimateTokens(completionText) },
+        usage: buildUsage(estimatePromptTokens(ctx.messages), estimateTokens(completionText)),
       }));
       return;
     }
@@ -687,7 +693,7 @@ async function nonStreamingWithTools(ctx: NonStreamToolCtx): Promise<void> {
       created: Math.floor(Date.now() / 1000),
       model: ctx.requestedModel,
       choices: [{ index: 0, message: assistantMessage, finish_reason: "stop" }],
-      usage: { prompt_tokens: estimatePromptTokens(ctx.messages), completion_tokens: estimateTokens(completionText), total_tokens: estimatePromptTokens(ctx.messages) + estimateTokens(completionText) },
+      usage: buildUsage(estimatePromptTokens(ctx.messages), estimateTokens(completionText)),
     }));
     return;
   }

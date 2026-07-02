@@ -104,7 +104,13 @@ export function modelToPiModel(m: ModelInfo) {
     contextWindow: ctx || 128000,
     maxTokens: maxOut || 4096,
     compat: {
+      supportsStore: false,
+      supportsDeveloperRole: false,
+      supportsReasoningEffort: false,
       supportsUsageInStreaming: true,
+      maxTokensField: "max_tokens",
+      requiresToolResultName: false,
+      requiresAssistantAfterToolResult: false,
     },
   };
 }
