@@ -59,13 +59,11 @@ export function deleteCredentials(): boolean {
 
 /**
  * Validate credentials by hitting t3.chat's tRPC getCustomerData endpoint.
- * Returns true if the cookies are still valid.
+ * Returns { ok, error } with the actual error message from t3.chat.
  *
  * Tries wreq-js (TLS impersonation) first, falls back to standard fetch.
- * The getCustomerData endpoint requires valid auth cookies — unlike /api/status
- * which is a public deployment check.
  */
-export async function validateCredentials(creds: T3Credentials): Promise<boolean> {
+export async function validateCredentials(creds: T3Credentials): Promise<{ ok: boolean; error?: string }> {
   const url = "https://t3.chat/api/trpc/getCustomerData?batch=1&input=" +
     encodeURIComponent(JSON.stringify({ 0: { json: { sessionId: null } } }));
   const headers: Record<string, string> = {
@@ -77,16 +75,26 @@ export async function validateCredentials(creds: T3Credentials): Promise<boolean
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
   };
 
+  let lastError: string | undefined;
+
   try {
     const { request } = await import("wreq-js");
     const resp = await request(url, { method: "GET", headers, impersonate: "chrome136" });
-    if (resp.ok) return true;
-  } catch {}
+    if (resp.ok) return { ok: true };
+    const body = await resp.text();
+    lastError = `wreq-js: HTTP ${resp.status} — ${body.slice(0, 300)}`;
+  } catch (e) {
+    lastError = `wreq-js failed: ${e instanceof Error ? e.message : String(e)}`;
+  }
 
   try {
     const resp = await fetch(url, { method: "GET", headers });
-    return resp.ok;
-  } catch {}
+    if (resp.ok) return { ok: true };
+    const body = await resp.text();
+    lastError = `fetch: HTTP ${resp.status} — ${body.slice(0, 300)}`;
+  } catch (e) {
+    lastError = `fetch failed: ${e instanceof Error ? e.message : String(e)}`;
+  }
 
-  return false;
+  return { ok: false, error: lastError };
 }

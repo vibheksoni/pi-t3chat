@@ -1,14 +1,12 @@
 /**
- * t3.chat streaming chat via SSE, using wreq-js for TLS impersonation.
+ * t3.chat streaming chat via SSE.
  *
  * POST https://t3.chat/api/chat
  * Body: JSON { messages, model, threadId, convexSessionId, config }
  * Response: SSE stream with text-delta, reasoning-delta, finish, etc.
  *
- * TLS impersonation is required — standard fetch() gets blocked by t3.chat.
- * wreq-js provides Chrome 136 emulation via native Rust wreq bindings.
+ * Tries wreq-js (TLS impersonation) first, falls back to standard fetch.
  */
-import { request, type Response as WreqResponse } from "wreq-js";
 import { parseSSEStream, type SSEEvent } from "./sse";
 import { buildConfigObject, type ChatConfig } from "./config";
 
@@ -132,21 +130,34 @@ export async function* streamChat(req: ChatRequest): AsyncGenerator<ChatEvent> {
     ? AbortSignal.any([req.signal, timeoutController.signal])
     : timeoutController.signal;
 
-  let resp: WreqResponse;
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Cookie: req.cookies,
+    Referer: "https://t3.chat/",
+    Origin: "https://t3.chat",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+  };
+
+  let resp: { ok: boolean; status: number; text: () => Promise<string>; body: ReadableStream<Uint8Array> | null };
   try {
-    resp = await request(`${T3_BASE_URL}/api/chat`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Cookie: req.cookies,
-        Referer: "https://t3.chat/",
-        Origin: "https://t3.chat",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
-      },
-      body,
-      signal,
-      impersonate: "chrome136",
-    });
+    try {
+      const { request: wreqRequest } = await import("wreq-js");
+      resp = await wreqRequest(`${T3_BASE_URL}/api/chat`, {
+        method: "POST",
+        headers,
+        body,
+        signal,
+        impersonate: "chrome136",
+      });
+    } catch {
+      const fetchResp = await fetch(`${T3_BASE_URL}/api/chat`, { method: "POST", headers, body, signal });
+      resp = {
+        ok: fetchResp.ok,
+        status: fetchResp.status,
+        text: () => fetchResp.text(),
+        body: fetchResp.body,
+      };
+    }
   } finally {
     clearTimeout(timeoutTimer);
   }

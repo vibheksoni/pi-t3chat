@@ -6,9 +6,8 @@
  * t3.chat, finds /assets/*.js chunks, and parses model definitions
  * from the JS using regex.
  *
- * Uses wreq-js for TLS impersonation — standard fetch gets blocked.
+ * Tries wreq-js (TLS impersonation) first, falls back to standard fetch.
  */
-import { request, type Response as WreqResponse } from "wreq-js";
 
 export interface ModelInfo {
   id: string;
@@ -47,15 +46,39 @@ const T3_BASE = "https://t3.chat";
 let cached: ModelCatalog | null = null;
 let inFlight: Promise<ModelCatalog | null> | null = null;
 
+const DEFAULT_HEADERS: Record<string, string> = {
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+  Referer: "https://t3.chat/",
+};
+
+type FetchFn = (url: string, opts?: { method?: string; headers?: Record<string, string> }) => Promise<{ ok: boolean; status: number; text: () => Promise<string> }>;
+
+let _fetchFn: FetchFn | null = null;
+
+async function getFetchFn(): Promise<FetchFn> {
+  if (_fetchFn) return _fetchFn;
+
+  try {
+    const wreq = await import("wreq-js");
+    _fetchFn = async (url, opts) => {
+      return wreq.request(url, {
+        method: opts?.method ?? "GET",
+        headers: { ...DEFAULT_HEADERS, ...opts?.headers },
+        impersonate: "chrome136",
+      });
+    };
+    return _fetchFn;
+  } catch {}
+
+  _fetchFn = async (url, opts) => {
+    return fetch(url, { method: opts?.method ?? "GET", headers: { ...DEFAULT_HEADERS, ...opts?.headers } });
+  };
+  return _fetchFn;
+}
+
 async function fetchPageHtml(): Promise<string> {
-  const resp: WreqResponse = await request(T3_BASE, {
-    method: "GET",
-    headers: {
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
-      Referer: "https://t3.chat/",
-    },
-    impersonate: "chrome136",
-  });
+  const fn = await getFetchFn();
+  const resp = await fn(T3_BASE);
   if (!resp.ok) throw new Error(`Failed to fetch t3.chat homepage: HTTP ${resp.status}`);
   return await resp.text();
 }
@@ -76,14 +99,8 @@ function extractJsChunks(html: string): string[] {
 }
 
 async function fetchJsChunk(chunkPath: string): Promise<string> {
-  const resp: WreqResponse = await request(`${T3_BASE}/${chunkPath}`, {
-    method: "GET",
-    headers: {
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
-      Referer: "https://t3.chat/",
-    },
-    impersonate: "chrome136",
-  });
+  const fn = await getFetchFn();
+  const resp = await fn(`${T3_BASE}/${chunkPath}`);
   if (!resp.ok) return "";
   return await resp.text();
 }

@@ -53,9 +53,10 @@ async function loginT3Chat(callbacks: OAuthLoginCallbacks): Promise<OAuthCredent
     issuedAt: new Date().toISOString(),
   };
 
-  const valid = await validateCredentials(creds);
-  if (!valid) {
-    console.error("[t3chat] warning: credential validation failed — saving anyway (wreq-js may not be installed yet)");
+  const result = await validateCredentials(creds);
+  if (!result.ok) {
+    console.error(`[t3chat] credential validation failed: ${result.error ?? "unknown error"}`);
+    console.error("[t3chat] saving credentials anyway — chat may still work");
   }
 
   saveCredentials(creds);
