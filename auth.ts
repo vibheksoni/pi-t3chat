@@ -65,7 +65,7 @@ export function deleteCredentials(): boolean {
  */
 export async function validateCredentials(creds: T3Credentials): Promise<{ ok: boolean; error?: string }> {
   const url = "https://t3.chat/api/trpc/getCustomerData?batch=1&input=" +
-    encodeURIComponent(JSON.stringify({ 0: { json: { sessionId: null } } }));
+    encodeURIComponent(JSON.stringify({ 0: { json: { sessionId: null }, meta: { values: { sessionId: ["undefined"] } } } }));
   const headers: Record<string, string> = {
     Cookie: creds.cookies,
     "x-trpc-source": "web-client",

@@ -56,8 +56,24 @@ export interface ModelBenchmark {
   scores: Record<string, number>;
 }
 
-function buildTrpcUrl(procedure: string, input: Record<string, unknown>): string {
-  const encoded = encodeURIComponent(JSON.stringify({ 0: { json: input } }));
+function buildTrpcUrl(procedure: string, input: Record<string, unknown> | null): string {
+  const payload: Record<string, unknown> = { 0: { json: input } };
+  if (input === null) {
+    payload[0] = { json: null, meta: { values: ["undefined"] } };
+  } else if (typeof input === "object" && input !== null) {
+    const metaValues: Record<string, string[]> = {};
+    let hasMeta = false;
+    for (const [k, v] of Object.entries(input)) {
+      if (v === null) {
+        metaValues[k] = ["undefined"];
+        hasMeta = true;
+      }
+    }
+    if (hasMeta) {
+      payload[0] = { json: input, meta: { values: metaValues } };
+    }
+  }
+  const encoded = encodeURIComponent(JSON.stringify(payload));
   return `${T3_BASE}/api/trpc/${procedure}?batch=1&input=${encoded}`;
 }
 
@@ -132,7 +148,7 @@ function collectCandidates(v: unknown, out: Array<Record<string, unknown>>): voi
 async function trpcCall(
   cookies: string,
   procedure: string,
-  input: Record<string, unknown>,
+  input: Record<string, unknown> | null,
   jsonl: boolean,
 ): Promise<string> {
   const url = buildTrpcUrl(procedure, input);
@@ -171,6 +187,7 @@ async function trpcCall(
 
 export async function getCustomerData(cookies: string): Promise<CustomerData> {
   const body = await trpcCall(cookies, "getCustomerData", { sessionId: null }, true);
+  
   const result = extractTrpcResult(body);
   if (!result) throw new Error("Failed to parse getCustomerData response");
   return {
@@ -184,7 +201,7 @@ export async function getCustomerData(cookies: string): Promise<CustomerData> {
 }
 
 export async function getSubscriptionData(cookies: string): Promise<SubscriptionData> {
-  const body = await trpcCall(cookies, "getSubscriptionData", {}, false);
+  const body = await trpcCall(cookies, "getSubscriptionData", null, false);
   const result = extractTrpcResult(body);
   if (!result) throw new Error("Failed to parse getSubscriptionData response");
   return {
@@ -194,7 +211,7 @@ export async function getSubscriptionData(cookies: string): Promise<Subscription
 }
 
 export async function getPricingProducts(cookies: string): Promise<PricingProduct[]> {
-  const body = await trpcCall(cookies, "getPricingProducts", {}, false);
+  const body = await trpcCall(cookies, "getPricingProducts", null, false);
   const result = extractTrpcResult(body);
   if (!result || !Array.isArray(result)) return [];
   return result.map((p: Record<string, unknown>) => ({
@@ -218,7 +235,7 @@ export async function getActiveSessions(cookies: string): Promise<SessionInfo[]>
 }
 
 export async function getModelStatuses(cookies: string): Promise<ModelStatus[]> {
-  const body = await trpcCall(cookies, "getModelStatuses", {}, false);
+  const body = await trpcCall(cookies, "getModelStatuses", null, false);
   const result = extractTrpcResult(body);
   if (!result || !Array.isArray(result)) return [];
   return result.map((s: Record<string, unknown>) => ({
@@ -229,7 +246,7 @@ export async function getModelStatuses(cookies: string): Promise<ModelStatus[]> 
 }
 
 export async function getModelBenchmarks(cookies: string): Promise<ModelBenchmark[]> {
-  const body = await trpcCall(cookies, "getAllModelBenchmarks", {}, false);
+  const body = await trpcCall(cookies, "getAllModelBenchmarks", null, false);
   const result = extractTrpcResult(body);
   if (!result || !Array.isArray(result)) return [];
   return result.map((b: Record<string, unknown>) => ({

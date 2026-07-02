@@ -7,8 +7,8 @@
  *
  * Tries wreq-js (TLS impersonation) first, falls back to standard fetch.
  */
-import { parseSSEStream, type SSEEvent } from "./sse";
-import { buildConfigObject, defaultConfig, type ChatConfig } from "./config";
+import { parseSSEStream, parseSSEData, type SSEEvent } from "./sse";
+import { defaultConfig, type ChatConfig } from "./config";
 
 export type ContentPart =
   | { type: "text"; text: string }
@@ -205,9 +205,55 @@ export async function* streamChat(req: ChatRequest): AsyncGenerator<ChatEvent> {
     throw new T3ChatError(`t3.chat HTTP ${resp.status}: ${text.slice(0, 400)}`, resp.status);
   }
 
-  if (!resp.body) throw new T3ChatError("t3.chat response had no body stream");
+  if (!resp.body) {
+    const fullText = await resp.text();
+    const lines = fullText.split("\n");
+    let sawFinish = false;
+    let sawToolCalls = false;
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || !trimmed.startsWith("data: ")) continue;
+      const data = trimmed.slice(6);
+      if (data === "[DONE]") break;
+      const ev = parseSSEData(data);
+      const mapped = mapSSEEvent(ev);
+      if (!mapped) continue;
+      if (mapped.kind === "finish") sawFinish = true;
+      if (mapped.kind === "tool_call_start" || mapped.kind === "tool_call_args") sawToolCalls = true;
+      yield mapped;
+    }
+    if (!sawFinish) {
+      yield { kind: "finish", reason: sawToolCalls ? "tool_calls" : "stop" };
+    }
+    return;
+  }
 
-  const reader = resp.body.getReader();
+  let reader: ReadableStreamDefaultReader<Uint8Array>;
+  try {
+    reader = resp.body.getReader();
+  } catch {
+    const fullText = await resp.text();
+    const lines = fullText.split("\n");
+    let sawFinish = false;
+    let sawToolCalls = false;
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || !trimmed.startsWith("data: ")) continue;
+      const data = trimmed.slice(6);
+      if (data === "[DONE]") break;
+      const ev = parseSSEData(data);
+      const mapped = mapSSEEvent(ev);
+      if (!mapped) continue;
+      if (mapped.kind === "finish") sawFinish = true;
+      if (mapped.kind === "tool_call_start" || mapped.kind === "tool_call_args") sawToolCalls = true;
+      yield mapped;
+    }
+    if (!sawFinish) {
+      yield { kind: "finish", reason: sawToolCalls ? "tool_calls" : "stop" };
+    }
+    return;
+  }
+
   let sawFinish = false;
   let sawToolCalls = false;
 

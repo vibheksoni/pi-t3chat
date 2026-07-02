@@ -75,7 +75,7 @@ function extractText(json: Record<string, unknown>): string {
   return "";
 }
 
-function parseSSEData(data: string): SSEEvent {
+export function parseSSEData(data: string): SSEEvent {
   try {
     const json = JSON.parse(data) as Record<string, unknown>;
     const eventType = json.type as string | undefined;
