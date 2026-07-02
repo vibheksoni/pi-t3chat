@@ -1,6 +1,10 @@
 <div align="center">
 
-<img src="assets/showcase.png" alt="pi-t3chat — t3.chat models in Pi coding agent" width="100%" />
+<a href="assets/showcase.png" target="_blank">
+<img src="assets/showcase.png" alt="pi-t3chat showcase" width="90%" style="border: 1px solid #30363d; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); padding: 8px; background: #0d1117;" />
+</a>
+
+<sub>pi-t3chat running in Pi — 50+ frontier models via t3.chat subscription</sub>
 
 # pi-t3chat
 
