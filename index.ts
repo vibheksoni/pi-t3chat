@@ -22,7 +22,6 @@ async function fetchDynamicModels(): Promise<ReturnType<typeof modelToPiModel>[]
     const catalog = await getCachedCatalog();
     if (catalog && catalog.byId.size > 0) {
       const models = [...catalog.byId.values()]
-        .filter((m) => !m.disabled)
         .map(modelToPiModel);
       logInfo(`t3chat: loaded ${models.length} models from catalog`);
       return models;

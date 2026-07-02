@@ -240,7 +240,7 @@ async function fetchCatalog(): Promise<ModelCatalog | null> {
 
     const byId = new Map<string, ModelInfo>();
     for (const model of models) {
-      if (!model.disabled) byId.set(model.id, model);
+      byId.set(model.id, model);
     }
 
     return { byId, fetchedAt: Date.now() };
