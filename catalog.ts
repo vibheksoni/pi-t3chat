@@ -89,9 +89,17 @@ async function fetchPageHtml(): Promise<string> {
 function extractJsChunks(html: string): string[] {
   const chunks: string[] = [];
   const seen = new Set<string>();
-  const re = /src="\.?\/(assets\/[^"]+\.js)"/g;
+  const linkRe = /<link[^>]*href="(\/assets\/[^"]+\.js[^"]*)"/g;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(html)) !== null) {
+  while ((m = linkRe.exec(html)) !== null) {
+    const path = m[1];
+    if (!seen.has(path)) {
+      seen.add(path);
+      chunks.push(path);
+    }
+  }
+  const scriptRe = /<script[^>]+src="(\/assets\/[^"]+\.js[^"]*)"/g;
+  while ((m = scriptRe.exec(html)) !== null) {
     const path = m[1];
     if (!seen.has(path)) {
       seen.add(path);
@@ -112,41 +120,44 @@ function parseModelsFromJs(js: string): ModelInfo[] {
   const models: ModelInfo[] = [];
   const seen = new Set<string>();
 
-  const modelRe = /\{[^{}]*?id:\s*["'`]([^"'`]+)["'`][^{}]*?name:\s*["'`]([^"'`]+)["'`][^{}]*?\}/gs;
+  const modelRe = /\{id:`([^`]+)`,.*?name:`([^`]*)`.*?provider:`([^`]*)`.*?developer:`([^`]*)`.*?shortDescription:`([^`]*)`.*?fullDescription:`([^`]*)`.*?(?:requiresPro:(true|false)).*?(?:premium:(true|false)).*?(?:disabled:(true|false)).*?(?:legacy:(true|false))/gs;
   let m: RegExpExecArray | null;
 
   while ((m = modelRe.exec(js)) !== null) {
-    const block = m[0];
     const id = m[1];
     const name = m[2];
 
     if (seen.has(id)) continue;
-    if (id.length < 2 || id.length > 80) continue;
-    if (name.length < 2 || name.length > 120) continue;
+    if (id.includes("/") || id.includes("$") || id.includes(" ")) continue;
 
     seen.add(id);
 
-    const provider = extractStringField(block, "provider") ?? guessProvider(id);
-    const developer = extractStringField(block, "developer") ?? provider;
-    const requiresPro = extractBoolField(block, "requires_pro") ?? extractBoolField(block, "requiresPro") ?? false;
-    const premium = extractBoolField(block, "premium") ?? false;
-    const disabled = extractBoolField(block, "disabled") ?? false;
-    const legacy = extractBoolField(block, "legacy") ?? false;
-    const creditAmount = extractNumberField(block, "credit_amount") ?? extractNumberField(block, "creditAmount") ?? 0;
+    const block = m[0];
+    const provider = m[3] || guessProvider(id);
+    const developer = m[4] || provider;
+    const requiresPro = m[7] === "true";
+    const premium = m[8] === "true";
+    const disabled = m[9] === "true";
+    const legacy = m[10] === "true";
+    const creditAmount = extractNumberField(block, "creditAmount") ?? 0;
 
+    const costMatch = /cost:\{input:([^,}]+),output:([^,}]+)(?:,fixed:([^}]+))?\}/.exec(block);
+    const cacheMatch = /cacheRead:([^,}]+),cacheWrite:([^,}]+)/.exec(block);
     const cost = {
-      input: extractNumberField(block, "input") ?? 0,
-      output: extractNumberField(block, "output") ?? 0,
-      cacheRead: extractNumberField(block, "cache_read") ?? extractNumberField(block, "cacheRead") ?? 0,
-      cacheWrite: extractNumberField(block, "cache_write") ?? extractNumberField(block, "cacheWrite") ?? 0,
-      fixed: extractNumberField(block, "fixed") ?? 0,
+      input: costMatch ? parseFloat(costMatch[1]) : 0,
+      output: costMatch ? parseFloat(costMatch[2]) : 0,
+      cacheRead: cacheMatch ? parseFloat(cacheMatch[1]) : 0,
+      cacheWrite: cacheMatch ? parseFloat(cacheMatch[2]) : 0,
+      fixed: costMatch?.[3] ? parseFloat(costMatch[3]) : 0,
     };
 
+    const appLimitsMatch = /app:\{maxInputTokens:(\d+),maxOutputTokens:(\d+)/.exec(block);
+    const providerLimitsMatch = /provider:\{maxInputTokens:(\d+),maxOutputTokens:(\d+)/.exec(block);
     const limits = {
-      appMaxInputTokens: extractNumberField(block, "app_max_input_tokens") ?? extractNumberField(block, "appMaxInputTokens") ?? 0,
-      appMaxOutputTokens: extractNumberField(block, "app_max_output_tokens") ?? extractNumberField(block, "appMaxOutputTokens") ?? 0,
-      providerMaxInputTokens: extractNumberField(block, "provider_max_input_tokens") ?? extractNumberField(block, "providerMaxInputTokens") ?? 0,
-      providerMaxOutputTokens: extractNumberField(block, "provider_max_output_tokens") ?? extractNumberField(block, "providerMaxOutputTokens") ?? 0,
+      appMaxInputTokens: appLimitsMatch ? parseInt(appLimitsMatch[1]) : 0,
+      appMaxOutputTokens: appLimitsMatch ? parseInt(appLimitsMatch[2]) : 0,
+      providerMaxInputTokens: providerLimitsMatch ? parseInt(providerLimitsMatch[1]) : 0,
+      providerMaxOutputTokens: providerLimitsMatch ? parseInt(providerLimitsMatch[2]) : 0,
     };
 
     const features = extractFeaturesArray(block);
@@ -217,12 +228,11 @@ async function fetchCatalog(): Promise<ModelCatalog | null> {
     const chunks = extractJsChunks(html);
     if (chunks.length === 0) return null;
 
-    const jsContents = await Promise.all(
-      chunks
-        .filter((c) => c.includes("model") || c.includes("main") || c.includes("chat"))
-        .slice(0, 8)
-        .map(fetchJsChunk),
-    );
+    const prioritized = chunks.filter((c) => c.includes("main-") || c.includes("model-selector"));
+    const rest = chunks.filter((c) => !prioritized.includes(c));
+    const ordered = [...prioritized, ...rest].slice(0, 12);
+
+    const jsContents = await Promise.all(ordered.map(fetchJsChunk));
 
     const allJs = jsContents.join("\n");
     const models = parseModelsFromJs(allJs);
