@@ -55,7 +55,7 @@ async function loginT3Chat(callbacks: OAuthLoginCallbacks): Promise<OAuthCredent
 
   const valid = await validateCredentials(creds);
   if (!valid) {
-    throw new Error("Credentials validation failed. Make sure your cookies are from a paid t3.chat session.");
+    console.error("[t3chat] warning: credential validation failed — saving anyway (wreq-js may not be installed yet)");
   }
 
   saveCredentials(creds);

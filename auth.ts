@@ -58,25 +58,35 @@ export function deleteCredentials(): boolean {
 }
 
 /**
- * Validate credentials by hitting t3.chat's status endpoint.
+ * Validate credentials by hitting t3.chat's tRPC getCustomerData endpoint.
  * Returns true if the cookies are still valid.
  *
- * Uses wreq-js for TLS impersonation — standard fetch() gets blocked.
+ * Tries wreq-js (TLS impersonation) first, falls back to standard fetch.
+ * The getCustomerData endpoint requires valid auth cookies — unlike /api/status
+ * which is a public deployment check.
  */
 export async function validateCredentials(creds: T3Credentials): Promise<boolean> {
+  const url = "https://t3.chat/api/trpc/getCustomerData?batch=1&input=" +
+    encodeURIComponent(JSON.stringify({ 0: { json: { sessionId: null } } }));
+  const headers: Record<string, string> = {
+    Cookie: creds.cookies,
+    "x-trpc-source": "web-client",
+    Referer: "https://t3.chat/",
+    "trpc-accept": "application/jsonl",
+    "x-trpc-batch": "true",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+  };
+
   try {
     const { request } = await import("wreq-js");
-    const resp = await request("https://t3.chat/api/status?dpl=LATEST", {
-      method: "GET",
-      headers: {
-        Cookie: creds.cookies,
-        Referer: "https://t3.chat/",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
-      },
-      impersonate: "chrome136",
-    });
+    const resp = await request(url, { method: "GET", headers, impersonate: "chrome136" });
+    if (resp.ok) return true;
+  } catch {}
+
+  try {
+    const resp = await fetch(url, { method: "GET", headers });
     return resp.ok;
-  } catch {
-    return false;
-  }
+  } catch {}
+
+  return false;
 }
