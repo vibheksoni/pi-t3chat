@@ -21,11 +21,12 @@ t3.chat models don't all support OpenAI-native function calling. This extension 
 4. **False refusal correction** — If the model claims it "can't access tools" while tools are available, the proxy automatically retries with a correction prompt (up to 2 retries)
 
 Example tool block emitted by the model:
-```
+
+````
 ```tool:read_file
 {"path": "/src/index.ts"}
 ```
-```
+````
 
 For models that support native tool calling via the SSE stream, the proxy also handles structured `tool_calls` deltas.
 
