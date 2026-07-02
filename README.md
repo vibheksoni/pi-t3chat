@@ -1,6 +1,25 @@
+<div align="center">
+
+<img src="assets/showcase.png" alt="pi-t3chat — t3.chat models in Pi coding agent" width="100%" />
+
 # pi-t3chat
 
-> t3.chat models in [Pi](https://github.com/earendil-works/pi-coding-agent) — Claude Fable-5, GPT-5.6, Gemini 3.5, Grok 4.3, DeepSeek V4 & 50+ frontier AI models via your t3.chat subscription.
+### t3.chat models in [Pi](https://github.com/earendil-works/pi-coding-agent) — 50+ frontier AI models via your t3.chat subscription
+
+[![GitHub stars](https://img.shields.io/github/stars/vibheksoni/pi-t3chat?style=flat-square&color=blue)](https://github.com/vibheksoni/pi-t3chat)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green?style=flat-square)](https://opensource.org/licenses/MIT)
+[![Models: 50+](https://img.shields.io/badge/Models-50+-blueviolet?style=flat-square)](#models)
+[![TLS: Chrome 142](https://img.shields.io/badge/TLS-Chrome_142-orange?style=flat-square)](#tls-impersonation)
+
+**Claude Fable-5 · GPT-5.6 · Gemini 3.5 · Grok 4.3 · DeepSeek V4 · Llama 4 · Qwen 3 · 50+ more**
+
+</div>
+
+---
+
+## Overview
+
+**pi-t3chat** is a [Pi coding agent](https://github.com/earendil-works/pi-coding-agent) extension that bridges t3.chat's multi-model API into Pi's OpenAI-compatible provider interface. It spins up a local proxy that translates OpenAI Chat Completions calls to t3.chat's SSE streaming format — with full TLS fingerprint impersonation, dynamic model discovery, text-based tool calling, and MCP wrapper tool discovery.
 
 ## How It Works
 
@@ -9,11 +28,22 @@ Pi  →  Local Proxy (127.0.0.1:42101)  →  t3.chat API (https://t3.chat/api/ch
          OpenAI-compatible HTTP           SSE streaming with TLS impersonation
 ```
 
-The extension spins up a local HTTP proxy that translates OpenAI Chat Completions API calls to t3.chat's SSE format. All requests to t3.chat use **wreq-js** for TLS fingerprint impersonation (Chrome 136) — standard `fetch()` gets blocked by t3.chat's bot detection.
+The extension spins up a local HTTP proxy that translates OpenAI Chat Completions API calls to t3.chat's SSE format. All requests to t3.chat use **wreq-js** for TLS fingerprint impersonation (Chrome 142) — standard `fetch()` gets blocked by t3.chat's bot detection.
 
-### Tool Calling
+## Features
 
-t3.chat models don't all support OpenAI-native function calling. This extension implements a **text-based tool calling protocol** (adapted from the NoTokenLimit project):
+- **50+ frontier AI models** — Claude, GPT, Gemini, Grok, DeepSeek, Llama, Qwen, and more through a single t3.chat subscription
+- **Dynamic model discovery** — scrapes t3.chat's JS bundles to fetch model definitions; zero hardcoding
+- **TLS fingerprint impersonation** — wreq-js with Chrome 142 emulation bypasses t3.chat's bot detection
+- **Text-based tool calling** — injects tool definitions as text; model emits `tool:` fenced blocks; proxy converts to OpenAI `tool_calls`
+- **MCP wrapper tools** — `mcp__` prefixed tools are grouped into MCP servers with `list_mcps` / `list_mcp_tools` / `call_mcp` discovery protocol
+- **False refusal correction** — auto-retries when the model claims it "can't access tools" while tools are available
+- **Credit tracking** — real-time balance, usage percentages, and subscription tier via tRPC endpoints
+- **Cookie-based auth** — no API keys; uses your existing t3.chat browser session
+
+## Tool Calling
+
+t3.chat models don't all support OpenAI-native function calling. This extension implements a **text-based tool calling protocol**:
 
 1. **Injection** — OpenAI tool definitions are injected into the system prompt as text instructions
 2. **Emission** — The model emits `tool:<name>` fenced code blocks in its response
@@ -29,6 +59,16 @@ Example tool block emitted by the model:
 ````
 
 For models that support native tool calling via the SSE stream, the proxy also handles structured `tool_calls` deltas.
+
+### MCP Wrapper Tools
+
+Tools with `mcp__` prefixes (e.g. `mcp__exa__web_search`) are automatically grouped into MCP servers. Instead of injecting all MCP tool definitions into the system prompt, the proxy injects three wrapper tools:
+
+- **`list_mcps`** — List all available MCP groups
+- **`list_mcp_tools`** — List tools within one MCP group
+- **`call_mcp`** — Execute a specific MCP tool by group + tool name
+
+The model discovers tools on-demand through a multi-round loop (max 6 rounds), reducing prompt size dramatically when many MCP tools are available.
 
 ## Installation
 
@@ -72,14 +112,16 @@ Run `t3chat-refresh` after new models are added to t3.chat.
 
 ### Notable Models
 
-- `claude-fable-5` — Anthropic's autonomous knowledge work model
-- `sonoma-dusk-alpha` — 2M token context window
-- `fast` — Efficient open model
-- 50+ models from Anthropic, Google, OpenAI, xAI, DeepSeek, Meta, Alibaba, Xiaomi, MiniMax, Moonshot, GLM, InclusionAI
+| Model | Description |
+|-------|-------------|
+| `claude-fable-5` | Anthropic's autonomous knowledge work model |
+| `sonoma-dusk-alpha` | 2M token context window |
+| `fast` | Efficient open model |
+| 50+ more | Anthropic, Google, OpenAI, xAI, DeepSeek, Meta, Alibaba, Xiaomi, MiniMax, Moonshot, GLM, InclusionAI |
 
 ## TLS Impersonation
 
-t3.chat blocks requests with non-browser TLS fingerprints. This extension uses [wreq-js](https://github.com/sqdshguy/wreq-js) — a Node.js/TypeScript HTTP client powered by native Rust [wreq](https://github.com/0x676e67/wreq) bindings — to impersonate Chrome 136's TLS/JA3/HTTP2 fingerprint on every request.
+t3.chat blocks requests with non-browser TLS fingerprints. This extension uses [wreq-js](https://github.com/sqdshguy/wreq-js) — a Node.js/TypeScript HTTP client powered by native Rust [wreq](https://github.com/0x676e67/wreq) bindings — to impersonate Chrome 142's TLS/JA3/HTTP2 fingerprint on every request.
 
 ## File Structure
 
@@ -90,6 +132,7 @@ pi-t3chat/
 ├── chat.ts      — t3.chat SSE streaming via wreq-js
 ├── sse.ts       — SSE stream parser for t3.chat events
 ├── tools.ts     — Text-based tool calling protocol (injection, parsing, correction)
+├── mcp.ts       — MCP wrapper tools (list_mcps / list_mcp_tools / call_mcp)
 ├── catalog.ts   — Model discovery by scraping t3.chat JS bundles
 ├── models.ts    — Model resolution (name → ID lookup)
 ├── usage.ts     — Credit tracking via tRPC endpoints
