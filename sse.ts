@@ -58,6 +58,23 @@ export async function* parseSSEStream(
   }
 }
 
+function extractText(json: Record<string, unknown>): string {
+  const delta = json.delta;
+  if (typeof delta === "string") return delta;
+  if (delta && typeof delta === "object") {
+    const deltaObj = delta as Record<string, unknown>;
+    if (typeof deltaObj.text === "string") return deltaObj.text;
+  }
+  if (typeof json.text === "string") return json.text;
+  if (Array.isArray(json.content)) {
+    return (json.content as Array<Record<string, unknown>>)
+      .filter((item) => typeof item.text === "string")
+      .map((item) => item.text as string)
+      .join("");
+  }
+  return "";
+}
+
 function parseSSEData(data: string): SSEEvent {
   try {
     const json = JSON.parse(data) as Record<string, unknown>;
@@ -67,11 +84,12 @@ function parseSSEData(data: string): SSEEvent {
       case "start":
         return { type: "start", threadId: json.threadId as string | undefined };
       case "text-delta":
-        return { type: "text-delta", text: json.textDelta as string ?? json.text as string ?? "" };
+      case "text":
+        return { type: "text-delta", text: extractText(json) };
       case "reasoning-start":
         return { type: "reasoning-start" };
       case "reasoning-delta":
-        return { type: "reasoning-delta", text: json.textDelta as string ?? json.text as string ?? "" };
+        return { type: "reasoning-delta", text: extractText(json) };
       case "finish-step":
         return { type: "finish-step" };
       case "finish":
@@ -82,6 +100,8 @@ function parseSSEData(data: string): SSEEvent {
         return { type: "tool-input-available", id: json.id as string, input: json.input as string };
       case "tool-output-available":
         return { type: "tool-output-available", id: json.id as string, output: json.output as string };
+      case "image-gen":
+        return { type: "image-url", url: (json.url as string ?? json.content as string ?? "") };
       default:
         if (json.base64Data || json.base64_data) {
           return { type: "image", base64Data: (json.base64Data ?? json.base64_data) as string, mimeType: (json.mimeType ?? "image/png") as string };
