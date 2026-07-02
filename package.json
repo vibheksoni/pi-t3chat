@@ -1,0 +1,43 @@
+{
+  "name": "pi-t3chat",
+  "version": "0.1.0",
+  "description": "t3.chat models in Pi — Claude Fable-5, GPT-5.6, Gemini 3.5, Grok 4.3, DeepSeek V4 & 50+ frontier AI models via your t3.chat subscription",
+  "author": "Vibhek Soni",
+  "license": "MIT",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "t3chat",
+    "t3-chat",
+    "ai",
+    "llm",
+    "provider",
+    "claude",
+    "gpt",
+    "gemini",
+    "grok",
+    "deepseek",
+    "tls-impersonation",
+    "frontier-models"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vibheksoni/pi-t3chat.git"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "files": [
+    "*.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "dependencies": {
+    "wreq-js": "^2.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.0.1"
+  }
+}

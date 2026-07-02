@@ -1,0 +1,12 @@
+node_modules/
+dist/
+*.js
+*.d.ts
+*.log
+.env
+.config.json
+credentials.json
+.*/
+.*.json
+*.md
+!README.md
