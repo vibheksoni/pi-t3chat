@@ -240,6 +240,9 @@ async function fetchCatalog(): Promise<ModelCatalog | null> {
 
     const byId = new Map<string, ModelInfo>();
     for (const model of models) {
+      const isImageOnly = model.features.length > 0
+        && model.features.every((f) => f === "images");
+      if (isImageOnly) continue;
       byId.set(model.id, model);
     }
 
