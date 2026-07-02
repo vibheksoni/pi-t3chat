@@ -11,9 +11,8 @@
  *   getModelStatuses    — real-time model operational status
  *   getAllModelBenchmarks — model benchmark scores
  *
- * Uses wreq-js for TLS impersonation.
+ * Tries wreq-js (TLS impersonation) first, falls back to standard fetch.
  */
-import { request, type Response as WreqResponse } from "wreq-js";
 
 const T3_BASE = "https://t3.chat";
 
@@ -148,11 +147,20 @@ async function trpcCall(
     headers["x-trpc-batch"] = "true";
   }
 
-  const resp: WreqResponse = await request(url, {
-    method: "GET",
-    headers,
-    impersonate: "chrome136",
-  });
+  let resp: { ok: boolean; status: number; text: () => Promise<string> };
+  let wreqResp: { ok: boolean; status: number; text: () => Promise<string> } | null = null;
+  try {
+    const wreq = await import("wreq-js");
+    if (typeof wreq.fetch === "function") {
+      wreqResp = await wreq.fetch(url, { method: "GET", headers, browser: "chrome_142" });
+    }
+  } catch {}
+  if (wreqResp) {
+    resp = wreqResp;
+  } else {
+    const fetchResp = await fetch(url, { method: "GET", headers });
+    resp = { ok: fetchResp.ok, status: fetchResp.status, text: () => fetchResp.text() };
+  }
 
   if (!resp.ok) {
     throw new Error(`tRPC ${procedure} failed: HTTP ${resp.status}`);

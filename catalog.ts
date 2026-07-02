@@ -60,14 +60,17 @@ async function getFetchFn(): Promise<FetchFn> {
 
   try {
     const wreq = await import("wreq-js");
-    _fetchFn = async (url, opts) => {
-      return wreq.request(url, {
-        method: opts?.method ?? "GET",
-        headers: { ...DEFAULT_HEADERS, ...opts?.headers },
-        impersonate: "chrome136",
-      });
-    };
-    return _fetchFn;
+    const wreqFetch = wreq.fetch;
+    if (typeof wreqFetch === "function") {
+      _fetchFn = async (url, opts) => {
+        return wreqFetch(url, {
+          method: opts?.method ?? "GET",
+          headers: { ...DEFAULT_HEADERS, ...opts?.headers },
+          browser: "chrome_142",
+        });
+      };
+      return _fetchFn;
+    }
   } catch {}
 
   _fetchFn = async (url, opts) => {

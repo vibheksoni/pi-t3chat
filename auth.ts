@@ -78,11 +78,17 @@ export async function validateCredentials(creds: T3Credentials): Promise<{ ok: b
   let lastError: string | undefined;
 
   try {
-    const { request } = await import("wreq-js");
-    const resp = await request(url, { method: "GET", headers, impersonate: "chrome136" });
-    if (resp.ok) return { ok: true };
-    const body = await resp.text();
-    lastError = `wreq-js: HTTP ${resp.status} — ${body.slice(0, 300)}`;
+    const wreq = await import("wreq-js");
+    if (typeof wreq.fetch === "function") {
+      const resp = await wreq.fetch(url, {
+        method: "GET",
+        headers,
+        browser: "chrome_142",
+      });
+      if (resp.ok) return { ok: true };
+      const body = await resp.text();
+      lastError = `wreq-js: HTTP ${resp.status} — ${body.slice(0, 300)}`;
+    }
   } catch (e) {
     lastError = `wreq-js failed: ${e instanceof Error ? e.message : String(e)}`;
   }

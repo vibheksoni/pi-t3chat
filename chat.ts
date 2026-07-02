@@ -140,16 +140,22 @@ export async function* streamChat(req: ChatRequest): AsyncGenerator<ChatEvent> {
 
   let resp: { ok: boolean; status: number; text: () => Promise<string>; body: ReadableStream<Uint8Array> | null };
   try {
+    let wreqResp: { ok: boolean; status: number; text: () => Promise<string>; body: ReadableStream<Uint8Array> | null } | null = null;
     try {
-      const { request: wreqRequest } = await import("wreq-js");
-      resp = await wreqRequest(`${T3_BASE_URL}/api/chat`, {
-        method: "POST",
-        headers,
-        body,
-        signal,
-        impersonate: "chrome136",
-      });
-    } catch {
+      const wreq = await import("wreq-js");
+      if (typeof wreq.fetch === "function") {
+        wreqResp = await wreq.fetch(`${T3_BASE_URL}/api/chat`, {
+          method: "POST",
+          headers,
+          body,
+          signal,
+          browser: "chrome_142",
+        });
+      }
+    } catch {}
+    if (wreqResp) {
+      resp = wreqResp;
+    } else {
       const fetchResp = await fetch(`${T3_BASE_URL}/api/chat`, { method: "POST", headers, body, signal });
       resp = {
         ok: fetchResp.ok,
